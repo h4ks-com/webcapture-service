@@ -5,6 +5,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
 import path from 'path';
 import { normalizeUrl, makeKey } from './utils';
+import { authenticateToken } from './auth';
 
 const TMP_DIR = process.env.TMP_DIR || '/tmp/capture';
 const CACHE_TTL = 3600 * 24 * 30; // seconds
@@ -43,7 +44,7 @@ app.get('/healthz', (_req, res) => {
   res.sendStatus(503);
 });
 
-app.get('/capture', async (req, res) => {
+app.get('/capture', authenticateToken, async (req, res) => {
   const { url, format, length, nocache } = req.query;
   // Validate query
   if (typeof url !== 'string' || typeof format !== 'string') {
