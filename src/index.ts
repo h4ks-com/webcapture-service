@@ -87,7 +87,7 @@ app.get('/capture', async (req, res) => {
       let count = 0;
       await new Promise<void>(resolve => {
         const interval = setInterval(async () => {
-          const framePath = path.join(frameDir, `frame-${String(count).padStart(3,'0')}.png`);
+          const framePath = path.join(frameDir, `frame-${String(count).padStart(3, '0')}.png`);
           await page.screenshot({ path: framePath });
           count++;
           if (count >= fps * lenNum!) {
@@ -109,8 +109,14 @@ app.get('/capture', async (req, res) => {
             '-loop 0'
           ])
           .output(outFull)
-          .on('end', resolve)
-          .on('error', reject)
+          .on('end', () => {
+            // ignore FFmpeg’s stdout/stderr args
+            resolve();
+          })
+          .on('error', (err: Error) => {
+            // capture the error
+            reject(err);
+          })
           .run();
       });
       // cleanup frames
