@@ -5,6 +5,10 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || null;
 export function authenticateToken(req: Request, res: Response, next: NextFunction) {
   if (!AUTH_TOKEN) return next();
 
+  const { nocache } = req.query;
+  // Auth is only needed if nocache is set
+  if (nocache === undefined) return next();
+
   const authHeader = req.headers['authorization'];
   if (!authHeader) {
     return res.status(401).json({ error: 'Missing Authorization header' });
