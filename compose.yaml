@@ -2,7 +2,7 @@ services:
   capture:
     build: .
     ports:
-      - '3000:3000'
+      - '2000:3000'
     volumes:
       - tmp-data:/tmp/capture
     environment:

@@ -1,30 +1,63 @@
-FROM node:18-slim
+FROM node:18-slim AS base
 
-# Install ffmpeg
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
+# Skip Puppeteer's bundled Chromium download
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-# Create app dir
 WORKDIR /usr/src/app
 
-# Copy manifests
-COPY package.json package-lock.json tsconfig.json ./
+# Install Chromium and system libraries
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       chromium \
+       fontconfig                        \
+       fonts-liberation                  \
+       fonts-noto-core                   \
+       fonts-noto-cjk                    \
+       fonts-noto-color-emoji            \
+       fonts-symbola                     \
+       fonts-dejavu-core                 \
+       fonts-droid-fallback              \
+       libnss3 \
+       xdg-utils \
+       ffmpeg \
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install deps
-RUN npm ci --only=production
+# Point Puppeteer to the system Chromium binary
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Copy source
+
+FROM base AS deps
+WORKDIR /usr/src/app
+COPY package.json package-lock.json ./
+# Install all dependencies for build (dev & prod)
+RUN npm ci
+
+
+FROM deps AS build
+WORKDIR /usr/src/app
+COPY tsconfig.json .
 COPY src ./src
-
-# Build TS
+# Compile TS to JS
 RUN npm run build
 
-# Create tmp dir
-RUN mkdir -p /tmp/capture
-VOLUME ["/tmp/capture"]
 
-ENV TMP_DIR=/tmp/capture
+FROM base AS prod
+WORKDIR /usr/src/app
+
+# Copy package manifests for prune step
+COPY package.json package-lock.json ./
+
+# Copy built JS and node_modules
+COPY --from=build /usr/src/app/dist ./dist
+COPY --from=deps  /usr/src/app/node_modules ./node_modules
+
+# Remove devDependencies to slim down
+RUN npm prune --production
+
+# Expose HTTP port and TMP volume
+VOLUME ["/tmp/capture"]
 EXPOSE 3000
 
-CMD [ "npm", "start" ]
+# Run the service
+CMD ["node", "dist/index.js"]

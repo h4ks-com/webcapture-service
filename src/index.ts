@@ -7,7 +7,7 @@ import path from 'path';
 import { normalizeUrl, makeKey } from './utils';
 
 const TMP_DIR = process.env.TMP_DIR || '/tmp/capture';
-const CACHE_TTL = 3600; // seconds
+const CACHE_TTL = 3600 * 24 * 30; // seconds
 
 const app = express();
 const cache = new NodeCache({ stdTTL: CACHE_TTL, checkperiod: 120 });
@@ -18,8 +18,17 @@ let ready = false;
 /** Launch Puppeteer once at startup */
 async function boot() {
   browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
     headless: 'new',
+    dumpio: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '-enable-chrome-browser-cloud-management'
+    ],
+    // on macOS M1, override if needed:
+    executablePath: process.env.CHROME_PATH
   });
   await fs.mkdir(TMP_DIR, { recursive: true });
   ready = true;
