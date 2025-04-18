@@ -5,6 +5,7 @@ services:
       - tmp-data:/tmp/capture
     environment:
       - NODE_ENV=production
+      - CACHE_DIR=/tmp/capture
     env_file: .env
     restart: unless-stopped
     network_mode: host
