@@ -116,6 +116,7 @@ app.get('/capture', authenticateToken, async (req, res) => {
             '-vcodec libwebp',
             '-lossless 0',
             '-qscale 75',
+            '-vf scale=640:480',
             '-loop 0'
           ])
           .output(outFull)

@@ -1,14 +1,13 @@
 services:
   capture:
     build: .
-    ports:
-      - '2000:3000'
     volumes:
       - tmp-data:/tmp/capture
     environment:
       - NODE_ENV=production
     env_file: .env
     restart: unless-stopped
+    network_mode: host
 
 volumes:
   tmp-data:

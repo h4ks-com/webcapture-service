@@ -55,9 +55,7 @@ COPY --from=deps  /usr/src/app/node_modules ./node_modules
 # Remove devDependencies to slim down
 RUN npm prune --production
 
-# Expose HTTP port and TMP volume
 VOLUME ["/tmp/capture"]
-EXPOSE 3000
 
 # Run the service
 CMD ["node", "dist/index.js"]
