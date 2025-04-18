@@ -40,3 +40,7 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.ref_name }}
           cache-from: type=registry,ref=user/app:latest
           cache-to: type=inline
+
+      - name: Deploy to coolify
+        run: |
+          curl "${{ secrets.COOLIFY_WEBHOOK_URL }}" -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
