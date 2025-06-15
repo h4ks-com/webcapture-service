@@ -9,7 +9,7 @@ import { normalizeUrl, makeKey } from './utils';
 import { authenticateToken } from './auth';
 
 const CACHE_DIR = process.env.CACHE_DIR || '/tmp/capture';
-const DATA_DIR = process.env.DATA_DIR || path.join(CACHE_DIR, 'data');
+const DATA_DIR = path.join(CACHE_DIR, 'data');
 const CACHE_TTL = 3600 * 24 * (Number(process.env.CACHE_TTL) || 0);  // Default infinity
 const MAX_CONCURRENT = 5; // max concurrent captures
 
@@ -18,6 +18,8 @@ const app = express();
 
 let browser: Browser;
 let ready = false;
+
+console.log(`Using cache directory: ${CACHE_DIR}`);
 
 function initDatabase() {
   fs.mkdir(DATA_DIR, { recursive: true });
@@ -43,17 +45,30 @@ function initDatabase() {
 
 function cacheSet(key: string, filename: string) {
   const now = Date.now();
+  console.log(`Caching: ${key} → ${filename}`);
   db.run('INSERT OR REPLACE INTO cache (key, filename, created_at) VALUES (?, ?, ?)', [key, filename, now], (err) => {
     if (err) {
       console.error('Database error:', err);
     }
   });
 }
+export const fetchFirst = async (db: sqlite3.Database, sql: string, params: any[] = []): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      resolve(row);
+    });
+  });
+};
 
-function cacheGet(key: string): string | undefined {
-  const row = db.prepare('SELECT filename FROM cache WHERE key = ?').get(key);
+async function cacheGet(key: string): Promise<string | undefined> {
+  const row = await fetchFirst(db, 'SELECT filename FROM cache WHERE key = ?', [key]);
+
   // @ts-ignore
-  return row ? row.filename : undefined;
+  const filename = row ? row.filename : undefined;
+  console.log(row);
+  console.log(`Cache lookup for ${key}:`, row ? filename : 'not found');
+  return row ? filename : undefined;
 }
 
 const db = initDatabase();
@@ -121,7 +136,7 @@ app.get('/capture', authenticateToken, async (req, res) => {
     }
 
     const key = makeKey(normalized, fmt, lenNum);
-    let outPath = cacheGet(key);
+    let outPath = await cacheGet(key);
     if (nocache === undefined && outPath) {
       // Serve from cache
       return res.sendFile(path.resolve(CACHE_DIR, outPath));
