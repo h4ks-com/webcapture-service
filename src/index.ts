@@ -1,6 +1,6 @@
 import pLimit from 'p-limit';
 import express from 'express';
-import { PersistentNodeCache } from "persistent-node-cache";
+import sqlite3 from 'sqlite3';
 import puppeteer, { Browser } from 'puppeteer';
 import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
@@ -9,16 +9,54 @@ import { normalizeUrl, makeKey } from './utils';
 import { authenticateToken } from './auth';
 
 const CACHE_DIR = process.env.CACHE_DIR || '/tmp/capture';
+const DATA_DIR = process.env.DATA_DIR || path.join(CACHE_DIR, 'data');
 const CACHE_TTL = 3600 * 24 * (Number(process.env.CACHE_TTL) || 0);  // Default infinity
 const MAX_CONCURRENT = 5; // max concurrent captures
 
 const captureLimit = pLimit(MAX_CONCURRENT);
 const app = express();
-const cache = new PersistentNodeCache("diskcache", 120, CACHE_DIR, { stdTTL: CACHE_TTL });
 
 let browser: Browser;
 let ready = false;
 
+function initDatabase() {
+  fs.mkdir(DATA_DIR, { recursive: true });
+  const dbPath = path.join(DATA_DIR, 'cache.db');
+
+  const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cache (
+      key TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  // Clean expired entries if TTL is set
+  if (CACHE_TTL > 0) {
+    const expireTime = Date.now() - CACHE_TTL * 1000;
+    db.run('DELETE FROM cache WHERE created_at < ?', expireTime);
+  }
+  return db;
+}
+
+function cacheSet(key: string, filename: string) {
+  const now = Date.now();
+  db.run('INSERT OR REPLACE INTO cache (key, filename, created_at) VALUES (?, ?, ?)', [key, filename, now], (err) => {
+    if (err) {
+      console.error('Database error:', err);
+    }
+  });
+}
+
+function cacheGet(key: string): string | undefined {
+  const row = db.prepare('SELECT filename FROM cache WHERE key = ?').get(key);
+  // @ts-ignore
+  return row ? row.filename : undefined;
+}
+
+const db = initDatabase();
 
 /** Launch Puppeteer once at startup */
 async function boot() {
@@ -83,7 +121,7 @@ app.get('/capture', authenticateToken, async (req, res) => {
     }
 
     const key = makeKey(normalized, fmt, lenNum);
-    let outPath = cache.get<string>(key);
+    let outPath = cacheGet(key);
     if (nocache === undefined && outPath) {
       // Serve from cache
       return res.sendFile(path.resolve(CACHE_DIR, outPath));
@@ -98,7 +136,7 @@ app.get('/capture', authenticateToken, async (req, res) => {
         const filename = `${key}.png`;
         const full = path.join(CACHE_DIR, filename);
         await page.screenshot({ path: full, fullPage: true });
-        cache.set(key, filename);
+        cacheSet(key, filename);
         return res.sendFile(full);
       } else {
         // webp recording via ffmpeg + screenshots
@@ -143,7 +181,7 @@ app.get('/capture', authenticateToken, async (req, res) => {
         });
         // cleanup frames
         await fs.rm(frameDir, { recursive: true, force: true });
-        cache.set(key, outFile);
+        cacheSet(key, outFile);
         return res.sendFile(outFull);
       }
     } catch (err) {

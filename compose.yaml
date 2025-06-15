@@ -6,9 +6,29 @@ services:
     environment:
       - NODE_ENV=production
       - CACHE_DIR=/tmp/capture
+      - PORT=3000
     env_file: .env
     restart: unless-stopped
-    network_mode: host
+    deploy:
+      replicas: 4
+    networks:
+      - capture-network
+
+  loadbalancer:
+    image: nginx:latest
+    ports:
+      - "${PORT}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - capture
+    networks:
+      - capture-network
+    restart: unless-stopped
+
+networks:
+  capture-network:
+    driver: bridge
 
 volumes:
   tmp-data:
