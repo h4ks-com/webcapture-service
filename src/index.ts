@@ -10,10 +10,11 @@ import { authenticateToken } from './auth';
 
 const CACHE_DIR = process.env.CACHE_DIR || '/tmp/capture';
 const DATA_DIR = path.join(CACHE_DIR, 'data');
-const CACHE_TTL = 3600 * 24 * (Number(process.env.CACHE_TTL) || 0);  // Default infinity
-const MAX_CONCURRENT = 5; // max concurrent captures
+const CACHE_TTL = 3600 * 24 * (Number(process.env.CACHE_TTL) || 0);  // Default infinite if 0
+// Reduce max concurrent browsers to 2
+const MAX_CONCURRENT = 2;
 
-const captureLimit = pLimit(MAX_CONCURRENT);
+const browserLimit = pLimit(MAX_CONCURRENT);
 const app = express();
 
 let browser: Browser;
@@ -35,7 +36,6 @@ function initDatabase() {
     )
   `);
 
-  // Clean expired entries if TTL is set
   if (CACHE_TTL > 0) {
     const expireTime = Date.now() - CACHE_TTL * 1000;
     db.run('DELETE FROM cache WHERE created_at < ?', expireTime);
@@ -43,19 +43,22 @@ function initDatabase() {
   return db;
 }
 
+const db = initDatabase();
+
 function cacheSet(key: string, filename: string) {
   const now = Date.now();
   console.log(`Caching: ${key} → ${filename}`);
-  db.run('INSERT OR REPLACE INTO cache (key, filename, created_at) VALUES (?, ?, ?)', [key, filename, now], (err) => {
-    if (err) {
-      console.error('Database error:', err);
-    }
-  });
+  db.run(
+    'INSERT OR REPLACE INTO cache (key, filename, created_at) VALUES (?, ?, ?)',
+    [key, filename, now],
+    (err) => err && console.error('Database error:', err)
+  );
 }
+
 export const fetchFirst = async (db: sqlite3.Database, sql: string, params: any[] = []): Promise<any> => {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
-      if (err) reject(err);
+      if (err) return reject(err);
       resolve(row);
     });
   });
@@ -63,15 +66,10 @@ export const fetchFirst = async (db: sqlite3.Database, sql: string, params: any[
 
 async function cacheGet(key: string): Promise<string | undefined> {
   const row = await fetchFirst(db, 'SELECT filename FROM cache WHERE key = ?', [key]);
-
-  // @ts-ignore
   const filename = row ? row.filename : undefined;
-  console.log(row);
-  console.log(`Cache lookup for ${key}:`, row ? filename : 'not found');
-  return row ? filename : undefined;
+  console.log(`Cache lookup for ${key}:`, filename || 'not found');
+  return filename;
 }
-
-const db = initDatabase();
 
 /** Launch Puppeteer once at startup */
 async function boot() {
@@ -86,7 +84,6 @@ async function boot() {
       '-enable-chrome-browser-cloud-management',
       '--enable-unsafe-swiftshader'
     ],
-    // on macOS M1, override if needed:
     executablePath: process.env.CHROME_PATH
   });
   await fs.mkdir(CACHE_DIR, { recursive: true });
@@ -98,66 +95,74 @@ boot().catch(err => {
 });
 
 app.get('/healthz', (_req, res) => {
-  if (ready) return res.sendStatus(200);
-  res.sendStatus(503);
+  return ready ? res.sendStatus(200) : res.sendStatus(503);
 });
 
 app.get('/capture', authenticateToken, async (req, res) => {
-  if (!ready) return res.status(503).json({ error: 'Service unavailable.' });
-  await captureLimit(() => (async () => {
-    let { url, format, length, nocache } = req.query;
-    format = format || 'png';
-    length = length || '4';
+  if (!ready) {
+    return res.status(503).json({ error: 'Service unavailable.' });
+  }
 
-    // Validate query
-    if (typeof url !== 'string' || typeof format !== 'string') {
-      return res.status(400).json({ error: '`url` is required.' });
-    }
-    const fmt = format.toLowerCase();
-    if (!['png', 'webp'].includes(fmt)) {
-      return res.status(400).json({ error: '`format` must be "png" or "webp".' });
-    }
-    let lenNum: number | undefined;
-    if (fmt === 'webp') {
-      if (typeof length !== 'string') {
-        return res.status(400).json({ error: '`length` is required for webp.' });
-      }
-      lenNum = Number(length);
-      if (!Number.isInteger(lenNum) || lenNum < 1 || lenNum > 5) {
-        return res.status(400).json({ error: '`length` must be integer 1–5.' });
-      }
-    }
+  // Extract and validate params
+  let { url, format, length, nocache } = req.query;
+  format = format || 'png';
+  length = length || '4';
 
-    let normalized: string;
-    try {
-      normalized = normalizeUrl(url);
-    } catch {
-      return res.status(400).json({ error: 'Invalid URL.' });
-    }
+  if (typeof url !== 'string' || typeof format !== 'string') {
+    return res.status(400).json({ error: '`url` is required.' });
+  }
+  const fmt = format.toLowerCase();
+  if (!['png', 'webp'].includes(fmt)) {
+    return res.status(400).json({ error: '`format` must be "png" or "webp".' });
+  }
 
-    const key = makeKey(normalized, fmt, lenNum);
-    let outPath = await cacheGet(key);
-    if (nocache === undefined && outPath) {
-      // Serve from cache
-      return res.sendFile(path.resolve(CACHE_DIR, outPath));
+  let lenNum: number | undefined;
+  if (fmt === 'webp') {
+    if (typeof length !== 'string') {
+      return res.status(400).json({ error: '`length` is required for webp.' });
     }
+    lenNum = Number(length);
+    if (!Number.isInteger(lenNum) || lenNum < 1 || lenNum > 5) {
+      return res.status(400).json({ error: '`length` must be integer 1–5.' });
+    }
+  }
 
-    // Otherwise generate anew
+  // Normalize and generate cache key
+  let normalized: string;
+  try {
+    normalized = normalizeUrl(url);
+  } catch {
+    return res.status(400).json({ error: 'Invalid URL.' });
+  }
+  const key = makeKey(normalized, fmt, lenNum);
+
+  // Check cache first and serve immediately if found (unless nocache)
+  if (nocache === undefined) {
+    const cachedFile = await cacheGet(key);
+    if (cachedFile) {
+      const filePath = path.resolve(CACHE_DIR, cachedFile);
+      console.log('Serving from cache:', filePath);
+      return res.sendFile(filePath);
+    }
+  }
+
+  // Not cached or nocache: perform capture under concurrency limit
+  browserLimit(async () => {
     const page = await browser.newPage();
     try {
-
       await page.goto(normalized, { waitUntil: 'networkidle2', timeout: 60000 });
+
       if (fmt === 'png') {
         const filename = `${key}.png`;
         const full = path.join(CACHE_DIR, filename);
         await page.screenshot({ path: full, fullPage: true });
         cacheSet(key, filename);
-        return res.sendFile(full);
+        res.sendFile(full);
       } else {
-        // webp recording via ffmpeg + screenshots
+        // Generate webp animated
         const frameDir = path.join(CACHE_DIR, `frames-${key}`);
         await fs.mkdir(frameDir, { recursive: true });
-        const fps = 4; // 4fps → length*4 frames
+        const fps = 4;
         let count = 0;
         await new Promise<void>(resolve => {
           const interval = setInterval(async () => {
@@ -184,28 +189,24 @@ app.get('/capture', authenticateToken, async (req, res) => {
               '-loop 0'
             ])
             .output(outFull)
-            .on('end', () => {
-              // ignore FFmpeg’s stdout/stderr args
-              resolve();
-            })
-            .on('error', (err: Error) => {
-              // apture the error
-              reject(err);
-            })
+            .on('end', () => resolve())
+            .on('error', err => reject(err))
             .run();
         });
-        // cleanup frames
         await fs.rm(frameDir, { recursive: true, force: true });
         cacheSet(key, outFile);
-        return res.sendFile(outFull);
+        res.sendFile(outFull);
       }
     } catch (err) {
       console.error('Capture error:', err);
-      return res.status(500).json({ error: 'Failed to capture.' });
+      res.status(500).json({ error: 'Failed to capture.' });
     } finally {
       await page.close();
     }
-  })());
+  }).catch(err => {
+    console.error('Error in capture limit:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal error.' });
+  });
 });
 
 const PORT = process.env.PORT || 3000;
