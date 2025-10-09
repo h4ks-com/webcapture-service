@@ -102,6 +102,10 @@ app.get('/health', (_req, res) => {
   return ready ? res.sendStatus(200) : res.sendStatus(503);
 });
 
+app.get('/info', (_req, res) => {
+  return res.json({ ready, maxConcurrent: MAX_CONCURRENT });
+});
+
 app.get('/capture', authenticateToken, async (req, res) => {
   if (!ready) {
     return res.status(503).json({ error: 'Service unavailable.' });
