@@ -98,6 +98,10 @@ app.get('/healthz', (_req, res) => {
   return ready ? res.sendStatus(200) : res.sendStatus(503);
 });
 
+app.get('/health', (_req, res) => {
+  return ready ? res.sendStatus(200) : res.sendStatus(503);
+});
+
 app.get('/capture', authenticateToken, async (req, res) => {
   if (!ready) {
     return res.status(503).json({ error: 'Service unavailable.' });
