@@ -28,6 +28,9 @@ function initDatabase() {
 
   const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
 
+  // Enable WAL mode for better concurrent access with multiple replicas
+  db.run("PRAGMA journal_mode=WAL");
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS cache (
       key TEXT PRIMARY KEY,
