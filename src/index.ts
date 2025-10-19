@@ -97,6 +97,10 @@ boot().catch(err => {
   process.exit(1);
 });
 
+app.get('/', (_req, res) => {
+  return res.send('Webpage Capture Service is running.');
+});
+
 app.get('/healthz', (_req, res) => {
   return ready ? res.sendStatus(200) : res.sendStatus(503);
 });
