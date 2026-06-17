@@ -74,6 +74,22 @@ async function cacheGet(key: string): Promise<string | undefined> {
   return filename;
 }
 
+const GPU_ENABLED = process.env.WEBCAPTURE_GPU === '1';
+
+const GPU_ARGS = [
+  '--use-gl=angle',
+  '--use-angle=gl-egl',
+  '--enable-features=VaapiVideoEncoder,VaapiVideoDecoder',
+  '--ignore-gpu-blocklist',
+  '--enable-gpu-rasterization',
+  '--enable-zero-copy'
+];
+
+const SOFTWARE_ARGS = [
+  '--disable-gpu',
+  '--enable-unsafe-swiftshader'
+];
+
 /** Launch Puppeteer once at startup */
 async function boot() {
   browser = await puppeteer.launch({
@@ -83,9 +99,8 @@ async function boot() {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu',
       '-enable-chrome-browser-cloud-management',
-      '--enable-unsafe-swiftshader'
+      ...(GPU_ENABLED ? GPU_ARGS : SOFTWARE_ARGS)
     ],
     executablePath: process.env.CHROME_PATH
   });

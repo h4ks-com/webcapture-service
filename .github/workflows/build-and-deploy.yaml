@@ -9,5 +9,6 @@ jobs:
   build:
     uses: h4ks-com/k3s-deploy/.github/workflows/k3s-deploy.yaml@main
     with:
-      contexts: "."
-      images: "webcapture-service"
+      contexts: ".,."
+      images: "webcapture-service,webcapture-service-gpu"
+      dockerfiles: "Dockerfile,Dockerfile.gpu"

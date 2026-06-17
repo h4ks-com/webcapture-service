@@ -29,16 +29,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (software, default)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          cache-from: type=registry,ref=user/app:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+
+      - name: Build and push Docker image (GPU, hardware-accelerated)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.gpu
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest-gpu
+            ${{ env.IMAGE_NAME }}:${{ github.ref_name }}-gpu
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest-gpu
           cache-to: type=inline
 
       - name: Deploy to coolify
